@@ -1,32 +1,55 @@
-PWD := ${shell pwd}
+AR := ar
+CC := gcc
+PWD := $(shell pwd)
+CFLAGS := -Wall -Werror -g -I$(PWD) -I$(PWD)/framework
 
-all: main
+INTERFACE_LIBRARY := libpure-interface.so
+
+INTERFACE_SOURCES := pure-interface.c      \
+		     pktio-subsystem.c     \
+		     scheduler-subsystem.c \
+		     framework/rwlock.c
+
+INTERFACE_OBJECTS := \
+	$(patsubst %.c,%.po, $(INTERFACE_SOURCES))
+
+$(INTERFACE_LIBRARY): $(INTERFACE_OBJECTS)
+	$(CC) $(CFLAGS) -shared -o $@ $^ -ldl
+
+SCHEDULER_DEFAULT_MODULE := libscheduler-default.a
+
+SCHEDULER_DEFAULT_SOURCES := modules/scheduler-default.c
+
+SCHEDULER_DEFAULT_OBJECTS := \
+	$(patsubst %.c,%.o, $(SCHEDULER_DEFAULT_SOURCES))
+
+# scheduler default module is built into static library
+# and thus include the static header file to override subsystem APIs.
+modules/scheduler-default.o: modules/scheduler-default.c \
+			     modules/scheduler-default-static.h
+	$(CC) $(CFLAGS) --include modules/scheduler-default-static.h -c -o $@ $<
+
+$(SCHEDULER_DEFAULT_MODULE): $(SCHEDULER_DEFAULT_OBJECTS)
+	$(AR) rcs $@ $^
+
+ALL_MODULES := $(SCHEDULER_DEFAULT_MODULE)
+
+%.E: %.c
+	$(CC) $(CFLAGS) -fPIC -E -o $@ $<
+
+%.po: %.c
+	$(CC) $(CFLAGS) -fPIC -c -o $@ $<
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+main: main.o $(INTERFACE_LIBRARY) $(ALL_MODULES)
+	$(CC) $< -Wl,-Bstatic -lscheduler-default \
+		-Wl,-Bdynamic -L"${PWD}" -Wl,-R"${PWD}" -lpure-interface \
+		-o main
+
 clean:
-	rm -rf *.po *.so *.o main
-
-api-x.po: api-x.c
-	gcc -Wall -Werror -g -fPIC -c -o api-x.po api-x.c
-
-libapi-x.so: api-x.po
-	gcc -Wall -Werror -g -shared -o libapi-x.so api-x.po
-
-api-y.po: api-y.c
-	gcc -Wall -Werror -g -fPIC -c -o api-y.po api-y.c
-
-libapi-y.so: api-y.po
-	gcc -Wall -Werror -g -shared -o libapi-y.so api-y.po
-
-pure-interface.po: pure-interface.c
-	gcc -Wall -Werror -g -fPIC -c -o pure-interface.po pure-interface.c
-
-libpure-interface.so: pure-interface.po libapi-x.so libapi-y.so
-	gcc -Wall -Werror -g -shared -o libpure-interface.so pure-interface.po -ldl
-
-main.o: main.c
-	gcc -Wall -Werror -g -c -o main.o main.c
-
-main: main.o libpure-interface.so
-	gcc main.o -L"${PWD}" -Wl,-R"${PWD}" -lpure-interface -o main
+	rm -f main
+	find $(PWD) -regex ".*\.\(po\|so\|o\|E\|a\)$$" -delete
 
 .PHONY: all clean
-

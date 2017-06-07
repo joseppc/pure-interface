@@ -1,33 +1,5 @@
-#include <stdio.h>
-#include <dlfcn.h>
-#include "pure-interface.h"
 
-typedef const char *(*api_x_proto)(bool);
-typedef const char *(*api_y_proto)(bool);
-
-static struct {
-	api_x_proto x;
-	api_y_proto y;
-} api_protos = { NULL, NULL };
-
-static void *plugins[2] = { NULL, NULL };
-
-const char * __attribute__((weak)) api_x(bool print)
-{
-	if (api_protos.x)
-		return api_protos.x(print);
-	else
-		return NULL;
-}
-
-const char * __attribute__((weak)) api_y(bool print)
-{
-	if (api_protos.y)
-		return api_protos.y(print);
-	else
-		return NULL;
-}
-
+#if 0
 static void __attribute__((constructor)) load_plugins(void)
 {
 	printf("load api implementations.\n");
@@ -61,4 +33,4 @@ static void __attribute__((destructor)) unload_plugins(void)
 
 	printf("unload api implementations.\n");
 }
-
+#endif
