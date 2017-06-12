@@ -31,5 +31,5 @@ MODULE_CONSTRUCTOR(scheduler_default)
 	INIT_LIST_HEAD(&scheduler_default.list);
 
 	printf("scheduler default module register.\n");
-	/* subsystem_register_module(scheduler, &scheduler_default); */
+	subsystem_register_module(scheduler, &scheduler_default);
 }
