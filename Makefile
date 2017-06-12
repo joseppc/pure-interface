@@ -8,6 +8,7 @@ INTERFACE_LIBRARY := libpure-interface.so
 INTERFACE_SOURCES := pure-interface.c      \
 		     pktio-subsystem.c     \
 		     scheduler-subsystem.c \
+		     framework/module.c    \
 		     framework/rwlock.c
 
 INTERFACE_OBJECTS := \
@@ -26,8 +27,8 @@ SCHEDULER_DEFAULT_OBJECTS := \
 # scheduler default module is built into static library
 # and thus include the static header file to override subsystem APIs.
 modules/scheduler-default.o: modules/scheduler-default.c \
-			     modules/scheduler-default-static.h
-	$(CC) $(CFLAGS) --include modules/scheduler-default-static.h -c -o $@ $<
+			     modules/scheduler-default-override.h
+	$(CC) $(CFLAGS) --include modules/scheduler-default-override.h -c -o $@ $<
 
 $(SCHEDULER_DEFAULT_MODULE): $(SCHEDULER_DEFAULT_OBJECTS)
 	$(AR) rcs $@ $^

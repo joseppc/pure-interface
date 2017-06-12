@@ -50,11 +50,11 @@ typedef struct {
 	__attribute__((weak)) name ##_## api
 
 /* In case subsystem API implementations are built as static
- * libraries, one implementation can use this macro to override
- * the APIs weak stubs.
+ * libraries or preload DSOs, one implementation can use this
+ * macro to override the APIs weak stubs.
  */
-#define SUBSYSTEM_API_STATIC_OVERRIDE(name, api, _alias)	\
-	__attribute__((alias(_alias))) name ##_## api
+#define SUBSYSTEM_API_OVERRIDE(name, api, _alias)		\
+	__attribute__((alias(#_alias))) name ##_## api
 
 #define subsystem_constructor(name) 				\
 	do {							\
@@ -68,15 +68,14 @@ typedef struct {
 	static void __attribute__((constructor(101)))		\
 		name ##_## subsystem ##_## constructor(void)
 
-#define subsystem_read_lock(name)				\
-	rwlock_read_lock(&name ##_## subsystem.lock)
+#define subsystem_lock(access, name)				\
+	rwlock_ ##access## _lock(&name ##_## subsystem.lock)
 
-#define subsystem_read_unlock(name)				\
-	rwlock_read_unlock(&name ##_## subsystem.lock)
+#define subsystem_unlock(access, name)				\
+	rwlock_ ##access## _unlock(&name ##_## subsystem.lock)
 
 #define subsystem_foreach_module(name, mod)			\
-	list_for_each_entry(mod, 				\
-		&name ##_## subsystem.modules, list)
+	list_for_each_entry(mod, &name ##_## subsystem.modules, list)
 
 #define MODULE_CLASS(subsystem)					\
 	struct subsystem ##_## module {				\
@@ -88,6 +87,9 @@ typedef struct {
 		int (*init_global)(void);			\
 		int (*term_global)(void);			\
 
+/* Base class to all inherited subsystem module classes */
+typedef MODULE_CLASS(base) } module_base_t;
+
 /* Module constructors should be late than subsystem constructors,
  * in statically linked scenarios (both subsystems and modules are
  * linked statically). thus the priority 102 compared to the above
@@ -96,5 +98,39 @@ typedef struct {
 #define MODULE_CONSTRUCTOR(name) 				\
 	static void __attribute__((constructor(102)))		\
 		name ##_## module ##_## constructor(void)
+
+/* Subsystem modules registration:
+ * The purpose of this complicated routine aims to help dynamic
+ * module loader to properly handle dlopen() failures and to save
+ * the DSO handlers into subsystem modules' data structure instead
+ * of maintaining a separate storage for DSO handlers disconnected
+ * with the subsystem modules.
+ *
+ * The module loader dlopen() the module DSO ->
+ * The module constructor calls register_module() ->
+ * The dlopen() returns DSO handler ->
+ *     Success: the module loader calls install_dso()
+ *     Failure: the module loader calls abandon_dso()
+ */
+
+extern void __subsystem_install_dso(subsystem_t *, void *);
+extern void __subsystem_abandon_dso(subsystem_t *);
+
+extern int __subsystem_register_module(subsystem_t *, module_base_t *);
+
+/* Macro to allow polymorphism on DSO handlers */
+#define subsystem_install_dso(name, dso)			\
+	__subsystem_install_dso(&name ##_## subsystem, (void *)dso)
+
+#define subsystem_abandon_dso(name)				\
+	__subsystem_abandon_dso(&name ##_## subsystem)
+
+/* Macro to allow polymorphism on module data structures */
+#define subsystem_register_module(name, module)			\
+({								\
+	module_base_t *base = (module_base_t *)module;		\
+	__subsystem_register_module(				\
+		&name ##_## subsystem, base); 			\
+})
 
 #endif
