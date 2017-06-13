@@ -1,0 +1,9 @@
+.vscode
+.project
+.cproject
+*.a
+*.o
+*.E
+*.po
+*.so
+main
