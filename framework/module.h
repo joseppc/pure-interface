@@ -96,7 +96,7 @@ typedef MODULE_CLASS(base) } module_base_t;
  * subsystem constructor priority 101.
  */
 #define MODULE_CONSTRUCTOR(name) 				\
-	static void __attribute__((constructor(102)))		\
+	static void __attribute__((constructor(102), used))	\
 		name ##_## module ##_## constructor(void)
 
 /* Subsystem modules registration:

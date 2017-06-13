@@ -79,5 +79,6 @@ void __subsystem_abandon_dso(subsystem_t *subsystem)
 static void __attribute__((constructor(103)))
 		static_post_registration_done(void)
 {
+	printf("static post registration done.\n");
 	static_post_registration = NULL;
 }
