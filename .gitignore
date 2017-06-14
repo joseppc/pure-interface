@@ -6,4 +6,4 @@
 *.E
 *.po
 *.so
-main
+main*

@@ -3,9 +3,12 @@ CC := gcc
 PWD := $(shell pwd)
 CFLAGS := -Wall -Werror -g -I$(PWD) -I$(PWD)/framework
 
-INTERFACE_LIBRARY := libpure-interface.so
+# The interface library compiles with modular framework and
+# all subsystems and its own dynamic module loader (policies),
+# while the modular framework only provides mechanisms to
+# support variant dynamic module loader's implementation
 
-INTERFACE_LIBRARY_STATIC := libpure-interface.a
+INTERFACE_LIBRARY := libpure-interface.so
 
 INTERFACE_SOURCES := module-loader.c       \
 		     pktio-subsystem.c     \
@@ -16,47 +19,67 @@ INTERFACE_SOURCES := module-loader.c       \
 $(INTERFACE_LIBRARY): $(patsubst %.c,%.po, $(INTERFACE_SOURCES))
 	$(CC) $(CFLAGS) -shared -o $@ $^ -ldl
 
-$(INTERFACE_LIBRARY_STATIC): $(patsubst %.c,%.o, $(INTERFACE_SOURCES))
-	$(AR) rcs $@ $^
+# The modules to implement subsystems are either built into
+# static libraries or DSOs
 
 SCHEDULER_DEFAULT := libscheduler-default.so
 
+SCHEDULER_DEFAULT_OVERRIDE := libscheduler-default-override.so
+
 SCHEDULER_DEFAULT_STATIC := libscheduler-default.a
+
+SCHEDULER_DEFAULT_STATIC_OVERRIDE := libscheduler-default-override.a
 
 SCHEDULER_DEFAULT_SOURCES := modules/scheduler-default.c
 
 $(SCHEDULER_DEFAULT): $(patsubst %.c,%.po, $(SCHEDULER_DEFAULT_SOURCES))
 	$(CC) $(CFLAGS) -shared -o $@ $^
 
-# Scheduler default module is built into static library
-# and include the static header file to override subsystem APIs.
-modules/scheduler-default.o: modules/scheduler-default.c \
-			     modules/scheduler-default-override.h
-	$(CC) $(CFLAGS) --include modules/scheduler-default-override.h -c -o $@ $<
-
 $(SCHEDULER_DEFAULT_STATIC): $(patsubst %.c,%.o, $(SCHEDULER_DEFAULT_SOURCES))
 	$(AR) rcs $@ $^
 
-ALL_STATICS := $(INTERFACE_LIBRARY_STATIC) $(SCHEDULER_DEFAULT_STATIC)
-ALL_DYNAMICS := $(INTERFACE_LIBRARY) $(SCHEDULER_DEFAULT)
+# IF scheduler default module is configured to override subsystem APIs.
+$(SCHEDULER_DEFAULT_OVERRIDE): \
+	$(patsubst %.c,%-override.po, $(SCHEDULER_DEFAULT_SOURCES))
+	$(CC) $(CFLAGS) -shared -o $@ $^
+
+$(SCHEDULER_DEFAULT_STATIC_OVERRIDE): \
+	$(patsubst %.c,%-override.o, $(SCHEDULER_DEFAULT_SOURCES))
+	$(AR) rcs $@ $^
 
 %.E: %.c
-	$(CC) $(CFLAGS) -fPIC -E -o $@ $<
+	$(CC) $(CFLAGS) -E -o $@ $<
 
 %.po: %.c
 	$(CC) $(CFLAGS) -fPIC -c -o $@ $<
 
+%-override.po: %.c %-override.h
+	$(CC) $(CFLAGS) --include "$*-override.h" -fPIC -c -o $@ $<
+
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-main: main.o $(ALL_DYNAMICS)
-	$(CC) $< -L"${PWD}" -Wl,-R"${PWD}" -lpure-interface -o main
+%-override.o: %.c %-override.h
+	$(CC) $(CFLAGS) --include "$*-override.h" -c -o $@ $<
 
-main-static: main.o $(ALL_STATICS)
-	$(CC) $< -Wl,--whole-archive $(ALL_STATICS) -Wl,--no-whole-archive -o main-static
+main: main.o $(INTERFACE_LIBRARY) $(SCHEDULER_DEFAULT)
+	$(CC) $< -L"${PWD}" -Wl,-R"${PWD}" -lpure-interface -o $@
+
+main-static: main.o $(INTERFACE_LIBRARY) $(SCHEDULER_DEFAULT_STATIC)
+	$(CC) $< -Wl,--whole-archive	\
+	  $(SCHEDULER_DEFAULT_STATIC)	\
+	  -Wl,--no-whole-archive	\
+	  -L"${PWD}" -Wl,-R"${PWD}" -lpure-interface -o $@
+
+main-static-override: main.o $(INTERFACE_LIBRARY) \
+		      $(SCHEDULER_DEFAULT_STATIC_OVERRIDE)
+	$(CC) $< -Wl,--whole-archive		\
+	  $(SCHEDULER_DEFAULT_STATIC_OVERRIDE)	\
+	  -Wl,--no-whole-archive		\
+	  -L"${PWD}" -Wl,-R"${PWD}" -lpure-interface -o $@
 
 clean:
-	rm -f main main-static
+	rm -f main main-static main-static-override
 	find $(PWD) -regex ".*\.\(po\|so\|o\|E\|a\)$$" -delete
 
 .PHONY: all clean

@@ -2,6 +2,8 @@
 
 int main(int argc, char *argv[])
 {
+	dynamic_module_loader();
+
 	scheduler_api_one();
 	scheduler_api_two(10);
 

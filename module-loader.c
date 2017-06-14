@@ -1,36 +1,30 @@
+#include <stdio.h>
+#include <dlfcn.h>
+#include "module.h"
 
-#if 0
-static void __attribute__((constructor)) load_plugins(void)
+static const char *modules[] = {
+	"libpktio-loop.so",
+	"libpktio-socket.so",
+	"libscheduler-default.so",
+	 NULL};
+
+extern void dynamic_module_loader(void)
 {
-	printf("load api implementations.\n");
+	void *handler = NULL;
+	const char **name = NULL;
 
-	plugins[0] = dlopen("libapi-x.so", RTLD_LAZY | RTLD_GLOBAL);
-	if( NULL == plugins[0] )
-		printf("cannot load libapi-x.so!\n");
+	module_loader_start();
 
-	plugins[1] = dlopen("libapi-y.so", RTLD_LAZY | RTLD_GLOBAL);
-	if( NULL == plugins[1] )
-		printf("cannot load libapi-y.so!\n");
-
-	api_protos.x = (api_x_proto)dlsym(plugins[0], "api_x");
-	api_protos.y = (api_y_proto)dlsym(plugins[1], "api_y");
-}
-
-static void __attribute__((destructor)) unload_plugins(void)
-{
-	api_protos.x = NULL;
-	api_protos.y = NULL;
-
-	if( NULL != plugins[0] ) {
-		dlclose(plugins[0]);
-		plugins[0] = NULL;
+	/* Use RTLD_NOW to avoid lazy resolution, since typically
+	 * modules do not have external references at all.
+	 */
+	for (name = &modules[0]; *name != NULL; name++) {
+		handler = dlopen(*name, RTLD_NOW | RTLD_GLOBAL);
+		if (handler != NULL)
+			module_install_dso(handler);
+		else
+			module_abandon_dso();
 	}
 
-	if( NULL != plugins[1] ) {
-		dlclose(plugins[1]);
-		plugins[1] = NULL;
-	}
-
-	printf("unload api implementations.\n");
+	module_loader_end();
 }
-#endif

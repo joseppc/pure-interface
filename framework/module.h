@@ -96,41 +96,42 @@ typedef MODULE_CLASS(base) } module_base_t;
  * subsystem constructor priority 101.
  */
 #define MODULE_CONSTRUCTOR(name) 				\
-	static void __attribute__((constructor(102), used))	\
+	static void __attribute__((constructor(102)))		\
 		name ##_## module ##_## constructor(void)
 
 /* Subsystem modules registration:
  * The purpose of this complicated routine aims to help dynamic
- * module loader to properly handle dlopen() failures and to save
- * the DSO handlers into subsystem modules' data structure instead
- * of maintaining a separate storage for DSO handlers disconnected
- * with the subsystem modules.
+ * module loader to properly handle dlopen() failures as well as
+ * to save the DSO handlers into subsystem modules' data structure
+ * instead of maintain a separate storage of DSO handlers dis-
+ * connected with the subsystem modules.
  *
- * The module loader dlopen() the module DSO ->
- * The module constructor calls register_module() ->
- * The dlopen() returns DSO handler ->
- *     Success: the module loader calls install_dso()
- *     Failure: the module loader calls abandon_dso()
+ * The dynamic module loader should program in this way:
+ *	module_loader_start();
+ *	...any policies as read configurations or...
+ *	...predefined names to decide the DSOs to be loaded...
+ * 	for each DSO
+ *		dlopen(DSO)
+ *		-- the module constructor calls register_module()
+ *		dlopen(DSO) returns the handler
+ *		success ? install_dso() to submit the registration
+ *		failure ? abandon_dso() to cancel the registration
+ *	module_loader_end();
  */
 
-extern void __subsystem_install_dso(subsystem_t *, void *);
-extern void __subsystem_abandon_dso(subsystem_t *);
+extern void module_loader_start(void);
+extern void module_loader_end(void);
+
+extern int module_install_dso(void *);
+extern int module_abandon_dso(void);
 
 extern int __subsystem_register_module(subsystem_t *, module_base_t *);
 
-/* Macro to allow polymorphism on DSO handlers */
-#define subsystem_install_dso(name, dso)			\
-	__subsystem_install_dso(&name ##_## subsystem, (void *)dso)
-
-#define subsystem_abandon_dso(name)				\
-	__subsystem_abandon_dso(&name ##_## subsystem)
-
 /* Macro to allow polymorphism on module data structures */
-#define subsystem_register_module(name, module)			\
-({								\
-	module_base_t *base = (module_base_t *)module;		\
-	__subsystem_register_module(				\
-		&name ##_## subsystem, base); 			\
+#define subsystem_register_module(name, module)			  \
+({								  \
+	module_base_t *base = (module_base_t *)module;		  \
+	__subsystem_register_module(&name ##_## subsystem, base); \
 })
 
 #endif
