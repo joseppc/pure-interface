@@ -11,6 +11,8 @@ struct atomic_u32_s {
 	uint32_t v;
 } __attribute__((aligned(sizeof(uint32_t))));
 
+#define ATOMIC_INIT(a) { .v = a }
+
 typedef struct atomic_u32_s atomic_u32_t;
 
 static inline void atomic_init_u32(atomic_u32_t *atom, uint32_t val)

@@ -6,7 +6,9 @@
  * implementation module, to reduce overhead of locks and API
  * function pointers.
  */
-SUBSYSTEM(scheduler);
+
+#define SCHEDULER_SUBSYSTEM_VERSION 0x00010000UL
+SUBSYSTEM(scheduler, "scheduler public APIs", SCHEDULER_SUBSYSTEM_VERSION);
 
 int SUBSYSTEM_API_STUB(scheduler, api_one)(void)
 {

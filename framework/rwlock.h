@@ -10,6 +10,8 @@ typedef struct rwlock_s {
 	 * >0 read lock(s) taken */
 } rwlock_t;
 
+#define RW_LOCK_UNLOCKED(lock) { .cnt = ATOMIC_INIT(0) }
+
 /**
  * Initialize a reader/writer lock.
  *

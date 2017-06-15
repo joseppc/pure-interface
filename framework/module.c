@@ -2,41 +2,33 @@
 #include <errno.h>
 #include "module.h"
 
-/* This is tricky, dynamic module loader will install or abandon
- * the DSOs to finish the registration sessions. But in static or
- * dynamic linked scenarios, no dynamic moduler loader there to
- * complete the bottom halves of the registrations.
+#define MODULE_FRAMEWORK_VERSION 0x00010000UL
+SUBSYSTEM(module, "module framework", MODULE_FRAMEWORK_VERSION);
+
+/* Keep it simple, allow one registration session at a time. */
+typedef struct {
+	rwlock_t lock;
+	subsystem_t *subsystem;
+	module_base_t *module;
+} registration_session_t;
+
+static registration_session_t registration = {
+	.lock = RW_LOCK_UNLOCKED(lock),
+	.subsystem = NULL,
+	.module = NULL,
+};
+
+/* Module is linked statically or dynamically, and are loaded by
+ * program loader (execve) or dynamic linker/loader (ld.so)
+ *
+ * subsystem_register_module() should complete the whole registration
+ * session and link the module into subsystem's module array.
  */
-
-static subsystem_t *__subsystem_in_registration = NULL;
-static int (*__post_registration)(void *) = &module_install_dso;
-
-void module_loader_start(void)
-{
-	__subsystem_in_registration = NULL;
-	__post_registration = NULL;
-}
-
-void module_loader_end(void)
-{
-	__subsystem_in_registration = NULL;
-	__post_registration = &module_install_dso;
-}
-
-/* This is called by every module in its module constructor, and
- * must accormodate all the flavors of modules builds as:
- * 1) static library and static linked
- * 2) DSO and dynamic linked (cc -llibrary)
- *    In both it should complete the whole registration process
- * 3) DSO and loaded by dynamic module loader (dlopen()ed)
- *    In above it partially hold the registered module until the
- *    dynamic module loader calls install_dso() or abandon_dso()
- */
-int __subsystem_register_module(
+static int linker_register_module(
 	subsystem_t *subsystem, module_base_t *module)
 {
 	if (subsystem == NULL || module == NULL)
-		return -EINVAL;
+		return -ENOENT;
 
 	if (!list_empty(&module->list)) {
 		printf("module %s was already registered.\n",
@@ -44,72 +36,114 @@ int __subsystem_register_module(
 		return -EAGAIN;
 	}
 
-	/* Hold the write lock in top half of the registration */
+	rwlock_write_lock(&registration.lock);
+
+	module->handler = NULL;
 	rwlock_write_lock(&subsystem->lock);
+	list_add(&module->list, &subsystem->modules);
+	rwlock_write_unlock(&subsystem->lock);
 
-	if ((__subsystem_in_registration != NULL) ||
-	    (subsystem->registered != NULL))
-	{
-		printf("A previous registration "
-		       "has not been finished yet.\n");
+	rwlock_write_unlock(&registration.lock);
+	return 0;
+}
 
-		rwlock_write_unlock(&subsystem->lock);
+static int (*do_register_module)(subsystem_t *, module_base_t *)
+		= &linker_register_module;
+
+static int loader_register_module(
+	subsystem_t *subsystem, module_base_t *module)
+{
+	if (subsystem == NULL || module == NULL)
+		return -ENOENT;
+
+	if (!list_empty(&module->list)) {
+		printf("module %s was already registered.\n",
+		        module->name);
 		return -EAGAIN;
 	}
 
-	__subsystem_in_registration = subsystem;
-	subsystem->registered = &module->list;
+	if (rwlock_write_trylock(&registration.lock) == 0) {
+		registration.subsystem = subsystem;
+		registration.module = module;
+		return 0;
+	}
 
-	if (__post_registration != NULL)
-		return __post_registration(NULL);
+	rwlock_write_unlock(&registration.lock);
+	return -EACCES;
+}
 
-	return 0;
+void module_loader_start(void)
+{
+	rwlock_write_lock(&registration.lock);
+
+	if (registration.module != NULL ||
+	    registration.subsystem != NULL) {
+		printf("module loader start warn, A previous "
+		       "registration did not complete yet.\n");
+	}
+
+	registration.module = NULL;
+	registration.subsystem = NULL;
+	do_register_module = &loader_register_module;
+}
+
+void module_loader_end(void)
+{
+	if (registration.module != NULL ||
+	    registration.subsystem != NULL) {
+		printf("module loader end warn, A previous "
+		       "registration did not complete yet.\n");
+	}
+
+	registration.module = NULL;
+	registration.subsystem = NULL;
+	do_register_module = &linker_register_module;
+
+	rwlock_write_unlock(&registration.lock);
 }
 
 int module_install_dso(void *dso)
 {
-	subsystem_t *subsystem =
-		__subsystem_in_registration;
-
-	if (subsystem == NULL)
-		return -ENOENT;
-
-	/* Bottom halves of the registration, mutal exclusion
-	 * is guarenteed by subsystem_register_module() calls
+	/* Bottom halves of the registration, context exclusion
+	 * is guarenteed by module_loader_start()
 	 */
-	if (0 == rwlock_write_trylock(&subsystem->lock)) {
-		if (subsystem->registered != NULL) {
-			module_base_t *module = (module_base_t *)
-				subsystem->registered;
+	if (0 == rwlock_write_trylock(&registration.lock)) {
+		subsystem_t *subsystem = registration.subsystem;
+		module_base_t *module = registration.module;
 
+		if (subsystem != NULL && module != NULL) {
 			module->handler = dso;
-			subsystem->registered = NULL;
-			__subsystem_in_registration = NULL;
+			rwlock_write_lock(&subsystem->lock);
 			list_add(&module->list, &subsystem->modules);
+			rwlock_write_unlock(&subsystem->lock);
 		}
+
+		registration.subsystem = NULL;
+		registration.module = NULL;
+		return 0;
 	}
 
-	rwlock_write_unlock(&subsystem->lock);
-	return 0;
+	rwlock_write_unlock(&registration.lock);
+	return -EACCES;
 }
 
 int module_abandon_dso(void)
 {
-	subsystem_t *subsystem =
-		__subsystem_in_registration;
-
-	if (subsystem == NULL)
-		return 0;
-
-	/* Bottom halves of the registration, mutal exclusion
-	 * is guarenteed by subsystem_register_module() calls
+	/* Bottom halves of the registration, context exclusion
+	 * is guarenteed by module_loader_start()
 	 */
-	if (0 == rwlock_write_trylock(&subsystem->lock)) {
-		if (subsystem->registered != NULL)
-			subsystem->registered = NULL;
-			__subsystem_in_registration = NULL;
+	if (0 == rwlock_write_trylock(&registration.lock)) {
+		registration.subsystem = NULL;
+		registration.module = NULL;
+		return 0;
 	}
 
-	rwlock_write_unlock(&subsystem->lock);
-	return 0;
+	rwlock_write_unlock(&registration.lock);
+	return -EACCES;
+}
+
+int __subsystem_register_module(
+	subsystem_t *subsystem, module_base_t *module)
+{
+	return do_register_module(subsystem, module);
 }

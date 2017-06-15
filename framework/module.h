@@ -26,15 +26,35 @@
 
 typedef struct {
 	rwlock_t lock;
-	struct list_head modules, *registered;
+	uint32_t version;
+	const char *description;
+	struct list_head modules;
 	struct list_head *active;
 } subsystem_t;
 
 /* Subsystem instance name */
 #define subsystem(name) name ##_## subsystem
 
-/* Subsystem instantiation */
-#define SUBSYSTEM(name) subsystem_t name ##_## subsystem
+/* The trick is to use macro SUBSYSTEM() for both subsystem
+ * declaration and definition. ARGC() macro chooses either
+ * SUBSYSTEM_DEFINE() or SUBSYSTEM_DECLARE() depends on argument
+ * number,
+ */
+#define _ARGC(_0, _1, _2, _3, ...) _3
+#define  ARGC(...) _ARGC(__VA_ARGS__, DEFINE, 2, DECLARE, 0)
+
+#define _OVERLOAD(M, S, ...) M ## _ ## S(__VA_ARGS__)
+#define  OVERLOAD(M, S, ...) _OVERLOAD(M, S, __VA_ARGS__)
+
+#define SUBSYSTEM_DEFINE(name, _description, _version)		\
+	subsystem_t name ##_## subsystem = {			\
+		.lock = RW_LOCK_UNLOCKED(lock),			\
+		.version = _version,				\
+		.description = _description,			\
+	}
+
+#define SUBSYSTEM_DECLARE(name) subsystem_t name ##_## subsystem
+#define SUBSYSTEM(...) OVERLOAD(SUBSYSTEM, ARGC(__VA_ARGS__), __VA_ARGS__)
 
 /* Subsystem API prototype name */
 #define api_proto(subsystem, api) subsystem ##_## api ##_## proto_t
@@ -60,7 +80,6 @@ typedef struct {
 	do {							\
 		rwlock_init(&name ##_## subsystem.lock);	\
 		INIT_LIST_HEAD(&name ##_## subsystem.modules);	\
-		name ##_## subsystem.registered = NULL;		\
 		name ##_## subsystem.active = NULL;		\
 	} while(0)
 
@@ -99,23 +118,35 @@ typedef MODULE_CLASS(base) } module_base_t;
 	static void __attribute__((constructor(102)))		\
 		name ##_## module ##_## constructor(void)
 
-/* Subsystem modules registration:
- * The purpose of this complicated routine aims to help dynamic
- * module loader to properly handle dlopen() failures as well as
- * to save the DSO handlers into subsystem modules' data structure
- * instead of maintain a separate storage of DSO handlers dis-
- * connected with the subsystem modules.
+/* Subsystem Modules Registration
  *
- * The dynamic module loader should program in this way:
+ * subsystem_register_module() are called by all modules in their
+ * constructors, whereas the modules could be:
+ *
+ * 1) Linked statically or dynamically, and are loaded by program
+ *    loader (execve) or dynamic linker/loader (ld.so)
+ *
+ *    subsystem_register_module() should complete the whole
+ *    registration session and link the module into subsystem's
+ *    module array.
+ *
+ * 2) Loaded by a module loader in runtime with libdl APIs
+ *
+ *    The whole registration session needs to be split to aim the
+ *    module loader to properly handle dlopen() returns, and save
+ *    the DSO handler into module's data structure.
+ *
+ *    The module loader should program in this way:
  *	module_loader_start();
- *	...any policies as read configurations or...
- *	...predefined names to decide the DSOs to be loaded...
- * 	for each DSO
- *		dlopen(DSO)
+ *	......
+ * 	for each module
+ *		handler = dlopen(module)
  *		-- the module constructor calls register_module()
- *		dlopen(DSO) returns the handler
- *		success ? install_dso() to submit the registration
- *		failure ? abandon_dso() to cancel the registration
+ *		if (handler is valid)
+ *			install_dso(handler);
+ *		else
+	 		abandon_dso();
+ *      ......
  *	module_loader_end();
  */
 

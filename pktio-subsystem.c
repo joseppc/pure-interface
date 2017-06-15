@@ -5,7 +5,9 @@
  * in dynamic loadable module forms (DSOs), and subsystem API
  * stubs can route the calls to either implementation in runtime.
  */
-SUBSYSTEM(pktio);
+
+#define PKTIO_SUBSYSTEM_VERSION 0x00010000UL
+SUBSYSTEM(pktio, "pktio public APIs", PKTIO_SUBSYSTEM_VERSION);
 
 int SUBSYSTEM_API_STUB(pktio, api_one)(void)
 {
